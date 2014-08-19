@@ -61,7 +61,7 @@ dependencies = [
 	'ext/common/agents/HelperAgent/RequestHandler/Client.h',
 	'ext/common/agents/HelperAgent/RequestHandler/MainEventHandler.cpp',
 	'ext/common/agents/HelperAgent/RequestHandler/Utils.cpp',
-	'ext/common/agents/HelperAgent/RequestHandler/StateParsingHeaders.cpp',
+	'ext/common/agents/HelperAgent/RequestHandler/StateAnalyzingRequest.cpp',
 	'ext/common/agents/HelperAgent/ScgiRequestParser.h',
 	'ext/common/agents/HelperAgent/SystemMetricsTool.cpp',
 	'ext/common/Constants.h',

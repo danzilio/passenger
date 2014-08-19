@@ -25,7 +25,7 @@
 
 /*
    STAGES
-   
+
      Accept connect password
               |
              \|/
@@ -112,6 +112,7 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/make_shared.hpp>
 #include <ev++.h>
+#include <ostream>
 
 #if defined(__GLIBCXX__) || defined(__APPLE__)
 	#include <cxxabi.h>
@@ -119,8 +120,6 @@
 #endif
 
 #include <sys/types.h>
-#include <arpa/inet.h>
-#include <sys/un.h>
 #include <utility>
 #include <typeinfo>
 #include <cassert>
@@ -129,7 +128,7 @@
 #include <Logging.h>
 #include <MessageReadersWriters.h>
 #include <Constants.h>
-#include <ServerKit/Server.h>
+#include <ServerKit/HttpServer.h>
 #include <ApplicationPool2/ErrorRenderer.h>
 #include <StaticString.h>
 #include <Utils/StrIntUtils.h>
@@ -150,21 +149,16 @@ using namespace ApplicationPool2;
 
 #define MAX_STATUS_HEADER_SIZE 64
 
-#define RH_ERROR(client, x) P_ERROR("[Client " << client->name() << "] " << x)
-#define RH_WARN(client, x) P_WARN("[Client " << client->name() << "] " << x)
-#define RH_DEBUG(client, x) P_DEBUG("[Client " << client->name() << "] " << x)
-#define RH_TRACE(client, level, x) P_TRACE(level, "[Client " << client->name() << "] " << x)
-
 #define RH_LOG_EVENT(client, eventName) \
-	char _clientName[7 + 8]; \
-	snprintf(_clientName, sizeof(_clientName), "Client %d", client->fdnum); \
+	char _clientName[32]; \
+	getClientName(client, _clientName, sizeof(_clientName)); \
 	TRACE_POINT_WITH_DATA(_clientName); \
-	RH_TRACE(client, 3, "Event: " eventName)
+	SKC_TRACE(client, 3, "Event: " eventName)
 
 
-class RequestHandler: public ServerKit::Server<RequestHandler, Client> {
+class RequestHandler: public ServerKit::HttpServer<RequestHandler, Client> {
 private:
-	typedef ServerKit::Server<RequestHandler, Client> ParentClass;
+	typedef ServerKit::HttpServer<RequestHandler, Client> ParentClass;
 
 	const AgentOptions &options;
 	const ResourceLocator resourceLocator;
@@ -173,8 +167,8 @@ private:
 
 	#include <agents/HelperAgent/RequestHandler/Utils.cpp>
 	#include <agents/HelperAgent/RequestHandler/Hooks.cpp>
-  #include <agents/HelperAgent/RequestHandler/MainEventHandler.cpp>
-	#include <agents/HelperAgent/RequestHandler/StateParsingHeaders.cpp>
+	#include <agents/HelperAgent/RequestHandler/MainEventHandler.cpp>
+	#include <agents/HelperAgent/RequestHandler/StateAnalyzingRequest.cpp>
 
 public:
 	RequestHandler(ServerKit::Context *context,
@@ -188,15 +182,14 @@ public:
 		unionStationCore = pool->getUnionStationCore();
 	}
 
-	template<typename Stream>
-	void inspect(Stream &stream) const {
+	void inspect(ostream &stream) {
 		Client *client;
 
 		stream << activeClientCount << " clients:\n";
 
 		TAILQ_FOREACH (client, &activeClients, nextClient.activeOrDisconnectedClient) {
 			stream << "  Client " << client->getFd() << ":\n";
-			client->inspect(stream);
+			client->inspect(getLoop(), stream);
 		}
 	}
 };

@@ -29,10 +29,8 @@
 #include <string>
 
 #include <ServerKit/HttpRequest.h>
-#include <ServerKit/HttpRequestParser.h>
-#include <ServerKit/FdChannel.h>
-#include <ServerKit/FileBufferedChannel.h>
 #include <ServerKit/FileBufferedFdOutputChannel.h>
+#include <ServerKit/FdInputChannel.h>
 #include <ApplicationPool2/Pool.h>
 #include <UnionStation/Core.h>
 #include <UnionStation/Transaction.h>
@@ -48,65 +46,39 @@ using namespace boost;
 using namespace ApplicationPool2;
 
 
-class Request: public ServerKit::HttpRequest {
+class Request: public ServerKit::BaseHttpRequest {
 public:
-	/***** Client <-> RequestHandler I/O channels, pipes and watchers *****/
-
-	/** If request body buffering is turned on, it will be buffered into this FileBuffedChannel. */
-	ServerKit::FileBufferedChannel clientBodyBuffer;
-
 	/***** RequestHandler <-> Application I/O channels, pipes and watchers *****/
 
-	ServerKit::FileBufferedChannel appInput;
-	ServerKit::FdChannel appOutput;
+	ServerKit::FileBufferedFdOutputChannel appInput;
+	ServerKit::FdInputChannel appOutput;
 
 
 	/***** State variables *****/
 
 	enum {
-		PARSING_HEADERS,
-		BUFFERING_REQUEST_BODY,
+		ANALYZING_REQUEST,
 		CHECKING_OUT_SESSION,
 		SENDING_HEADER_TO_APP,
 		FORWARDING_BODY_TO_APP,
-
-		// Special states
-		HANDLE_NEXT_REQUEST_WHEN_OUTPUT_FLUSHED,
-		DISCONNECT_WHEN_OUTPUT_FLUSHED
+		SENDING_SIMPLE_RESPONSE
 	} state;
 
 	ev_tstamp startedAt;
 
-	/** The size of the request body. The request body is the part that comes
-	 * after the request headers, which may be the HTTP request message body,
-	 * but may also be any other arbitrary data that is sent over the request
-	 * socket (e.g. WebSocket data).
-	 *
-	 * Possible values:
-	 * 
-	 * -1: infinite. Should keep forwarding client body until end of stream.
-	 *  0: no client body. Should stop after sending headers to application.
-	 * >0: Should forward exactly this many bytes of the client body.
-	 */
-	long long requestBodyLength;
-	unsigned long long requestBodyAlreadyRead;
 	Options options;
 	SessionPtr session;
 	string appRoot;
 	struct {
-		UnionStation::ScopeLog
-			*requestProcessing,
-			*bufferingRequestBody,
-			*getFromPool,
-			*requestProxying;
+		UnionStation::ScopeLog *requestProcessing;
+		UnionStation::ScopeLog *bufferingRequestBody;
+		UnionStation::ScopeLog *getFromPool;
+		UnionStation::ScopeLog *requestProxying;
 	} scopeLogs;
 	unsigned int sessionCheckoutTry;
-	bool requestBodyIsBuffered;
-	bool requestIsChunked;
 	bool sessionCheckedOut;
 	bool checkoutSessionAfterCommit;
 	bool stickySession;
-
 	bool responseHeaderSeen;
 	bool chunkedResponse;
 	/** The size of the response body, set based on the values of
@@ -132,23 +104,16 @@ public:
 		deinitializeRequest();
 	}
 
-	void reinitialize(int fd) {
-		ServerKit::HttpRequest::reinitialize();
-
-		clientBodyBuffer.reinitialize();
+	void reinitialize() {
+		ServerKit::BaseHttpRequest::reinitialize();
 
 		// appInput and appOutput are initialized in
 		// RequestHandler::checkoutSession().
 
-		state = PARSING_HEADERS;
-		requestBodyIsBuffered = false;
-		requestIsChunked = false;
-		requestBodyLength = 0;
-		requestBodyAlreadyRead = 0;
-		checkoutSessionAfterCommit = false;
-		stickySession = false;
+		state = ANALYZING_REQUEST;
 		sessionCheckedOut = false;
 		sessionCheckoutTry = 0;
+		stickySession = false;
 		responseHeaderSeen = false;
 		chunkedResponse = false;
 		responseContentLength = -1;
@@ -167,30 +132,23 @@ public:
 
 		appOutput.deinitialize();
 		appInput.deinitialize();
-		clientBodyBuffer.deinitialize();
 	}
 
 	void deinitialize() {
 		deinitializeRequest();
-		ServerKit::HttpRequest::deinitialize();
+		ServerKit::BaseHttpRequest::deinitialize();
 	}
 
 	const char *getStateName() const {
 		switch (state) {
-		case PARSING_HEADERS:
-			return "PARSING_HEADERS";
-		case BUFFERING_REQUEST_BODY:
-			return "BUFFERING_REQUEST_BODY";
 		case CHECKING_OUT_SESSION:
 			return "CHECKING_OUT_SESSION";
 		case SENDING_HEADER_TO_APP:
 			return "SENDING_HEADER_TO_APP";
 		case FORWARDING_BODY_TO_APP:
 			return "FORWARDING_BODY_TO_APP";
-		case HANDLE_NEXT_REQUEST_WHEN_OUTPUT_FLUSHED:
-			return "HANDLE_NEXT_REQUEST_WHEN_OUTPUT_FLUSHED";
-		case DISCONNECT_WHEN_OUTPUT_FLUSHED:
-			return "DISCONNECT_WHEN_OUTPUT_FLUSHED";
+		case SENDING_SIMPLE_RESPONSE:
+			return "SENDING_SIMPLE_RESPONSE";
 		default:
 			return "UNKNOWN";
 		}
@@ -232,14 +190,13 @@ public:
 		options.transaction->message(message);
 	}
 
-	template<typename Stream>
-	void inspect(Stream &stream) const {
-		const char *indent = "    ";
+	void inspect(ostream &stream) const {
+		//const char *indent = "    ";
 
 		//stream << indent << "host                        = " << (scgiParser.getHeader("HTTP_HOST").empty() ? "(empty)" : scgiParser.getHeader("HTTP_HOST")) << "\n";
 		//stream << indent << "uri                         = " << (scgiParser.getHeader("REQUEST_URI").empty() ? "(empty)" : scgiParser.getHeader("REQUEST_URI")) << "\n";
 		//stream << indent << "connected at                = " << timestr << " (" << (unsigned long long) (ev_time() - connectedAt) << " sec ago)\n";
-		stream << indent << "state                       = " << getStateName() << "\n";
+		//stream << indent << "state                       = " << getStateName() << "\n";
 		/*if (session == NULL) {
 			stream << indent << "session                     = NULL\n";
 		} else {
@@ -268,6 +225,8 @@ public:
 			;
 		*/
 	}
+
+	DEFINE_SERVER_KIT_BASE_HTTP_REQUEST_FOOTER(Request);
 };
 
 

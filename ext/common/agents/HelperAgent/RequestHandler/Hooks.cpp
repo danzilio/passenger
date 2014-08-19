@@ -3,19 +3,19 @@
 
 protected:
 
-virtual void onClientObjectCreated(Client *client) {
-	ParentClass::onClientObjectCreated(client);
-	Request &req = client->req;
+virtual void
+onClientAccepted(Client *client) {
+	ParentClass::onClientAccepted(client);
+	client->connectedAt = ev_now(getLoop());
+}
 
-	//client->output.errorCallback = ...;
-	client->output.setFlushedCallback(_onClientOutputFlushed);
-
-	req.clientBodyBuffer.setContext(getContext());
-	req.clientBodyBuffer.setHooks(&client->hooks);
-	req.appInput.setContext(getContext());
-	req.appInput.setHooks(&client->hooks);
-	req.appOutput.setContext(getContext());
-	req.appOutput.setHooks(&client->hooks);
+virtual void
+onRequestObjectCreated(Client *client, Request *req) {
+	ParentClass::onRequestObjectCreated(client, req);
+	req->appInput.setContext(getContext());
+	req->appInput.setHooks(&req->hooks);
+	req->appOutput.setContext(getContext());
+	req->appOutput.setHooks(&req->hooks);
 	//req.appOutput.errorCallback = ...;
 	//req.appOutput.setFlushedCallback();
 

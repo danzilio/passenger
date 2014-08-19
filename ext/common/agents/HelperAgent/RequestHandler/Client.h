@@ -26,11 +26,9 @@
 #define _PASSENGER_REQUEST_HANDLER_CLIENT_H_
 
 #include <ev++.h>
-#include <string>
-
+#include <ostream>
+#include <ServerKit/HttpClient.h>
 #include <agents/HelperAgent/RequestHandler/Request.h>
-#include <ServerKit/Client.h>
-#include <Logging.h>
 
 namespace Passenger {
 
@@ -39,55 +37,24 @@ using namespace boost;
 using namespace ApplicationPool2;
 
 
-class Client: public ServerKit::Client {
-private:
-	/* static const char *boolStr(bool val) {
-		static const char *strs[] = { "false", "true" };
-		return strs[val];
-	} */
-
+class Client: public ServerKit::BaseHttpClient<Request> {
 public:
-	Request req;
-	ServerKit::HttpRequestParser reqParser;
-
 	ev_tstamp connectedAt;
 
-	DEFINE_SERVER_KIT_CLIENT_FOOTER(Client);
-
-
 	Client(void *server)
-		: ServerKit::Client(server),
-		  reqParser(&req)
+		: ServerKit::BaseHttpClient<Request>(server)
 		{ }
 
-	~Client() {
-		deinitialize();
-	}
-
 	virtual void reinitialize(int fd) {
-		ServerKit::Client::reinitialize(fd);
-		req.reinitialize(fd);
-		reqParser.reinitialize();
-		connectedAt = ev_time();
+		ServerKit::BaseHttpClient<Request>::reinitialize(fd);
 	}
 
 	virtual void deinitialize() {
-		reqParser.deinitialize();
-		req.deinitialize();
-		ServerKit::Client::deinitialize();
+		ServerKit::BaseHttpClient<Request>::deinitialize();
 	}
 
-	string name() const {
-		if (fdnum == -1) {
-			return "(null)";
-		} else {
-			return toString(fdnum);
-		}
-	}
-
-
-	template<typename Stream>
-	void inspect(Stream &stream) const {
+	void inspect(struct ev_loop *loop, ostream &stream) const {
+		#if 0
 		const char *indent = "    ";
 		time_t the_time;
 		struct tm the_tm;
@@ -130,7 +97,10 @@ public:
 			<< indent << "useUnionStation             = " << boolStr(useUnionStation()) << "\n"
 			;
 		*/
+		#endif
 	}
+
+	DEFINE_SERVER_KIT_BASE_HTTP_CLIENT_FOOTER(Client, Request);
 };
 
 
