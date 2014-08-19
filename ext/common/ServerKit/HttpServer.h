@@ -427,7 +427,7 @@ protected:
 					}
 					return buffer.size(); */
 				case Request::ERROR:
-					this->disconnect(&client);
+					this->disconnectWithError(&client, req->parseError);
 					return Channel::Result(0, true);
 				default:
 					P_BUG("TODO");
