@@ -68,7 +68,6 @@ public:
 
 	Options options;
 	SessionPtr session;
-	string appRoot;
 	struct {
 		UnionStation::ScopeLog *requestProcessing;
 		UnionStation::ScopeLog *bufferingRequestBody;
@@ -121,7 +120,6 @@ public:
 	}
 
 	void deinitializeRequest() {
-		appRoot.clear();
 		session.reset();
 		responseHeaderBufferer.reset();
 		responseDechunker.reset();

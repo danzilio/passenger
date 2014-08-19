@@ -129,8 +129,11 @@
 #include <MessageReadersWriters.h>
 #include <Constants.h>
 #include <ServerKit/HttpServer.h>
+#include <MemoryKit/palloc.h>
+#include <DataStructures/StringKeyTable.h>
 #include <ApplicationPool2/ErrorRenderer.h>
 #include <StaticString.h>
+#include <Utils.h>
 #include <Utils/StrIntUtils.h>
 #include <Utils/IOUtils.h>
 #include <Utils/HttpConstants.h>
@@ -164,11 +167,13 @@ private:
 	const ResourceLocator resourceLocator;
 	PoolPtr pool;
 	UnionStation::CorePtr unionStationCore;
+	StringKeyTable< boost::shared_ptr<Options> > poolOptionsCache;
+	bool singleAppMode;
 
 	#include <agents/HelperAgent/RequestHandler/Utils.cpp>
 	#include <agents/HelperAgent/RequestHandler/Hooks.cpp>
-	#include <agents/HelperAgent/RequestHandler/MainEventHandler.cpp>
-	#include <agents/HelperAgent/RequestHandler/StateAnalyzingRequest.cpp>
+	#include <agents/HelperAgent/RequestHandler/InitRequest.cpp>
+	#include <agents/HelperAgent/RequestHandler/CheckoutSession.cpp>
 
 public:
 	RequestHandler(ServerKit::Context *context,
@@ -177,7 +182,13 @@ public:
 		: ParentClass(context),
 		  options(_options),
 		  resourceLocator(_options.passengerRoot),
-		  pool(_pool)
+		  pool(_pool),
+		  poolOptionsCache(4),
+		  singleAppMode(false),
+		  PASSENGER_APP_GROUP_NAME("!~PASSENGER_APP_GROUP_NAME"),
+		  PASSENGER_STICKY_SESSIONS("!~PASSENGER_STICKY_SESSIONS"),
+		  PASSENGER_STICKY_SESSIONS_COOKIE_NAME("!~PASSENGER_STICKY_SESSIONS_COOKIE_NAME"),
+		  HTTP_COOKIE("cookie")
 	{
 		unionStationCore = pool->getUnionStationCore();
 	}
