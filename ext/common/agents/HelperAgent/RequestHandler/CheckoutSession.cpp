@@ -15,7 +15,7 @@ checkoutSession(Client *client, Request *req) {
 	options.currentTime = (unsigned long long) (ev_now(getLoop()) * 1000000);
 
 	refRequest(req);
-	pool->asyncGet(options, callback);
+	appPool->asyncGet(options, callback);
 }
 
 static void

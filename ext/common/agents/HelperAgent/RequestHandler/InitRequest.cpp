@@ -164,13 +164,17 @@ createNewPoolOptions(Client *client, Request *req) {
 		options.baseURI = StaticString(scriptName->start->data, scriptName->size);
 	}
 
-	options.ruby = this->options.defaultRubyCommand;
+	options.ruby = defaultRuby;
 	options.logLevel = getLogLevel();
-	options.loggingAgentAddress = this->options.loggingAgentAddress;
+	options.loggingAgentAddress = loggingAgentAddress;
 	options.loggingAgentUsername = P_STATIC_STRING("logging");
-	options.loggingAgentPassword = this->options.loggingAgentPassword;
-	options.defaultUser = this->options.defaultUser;
-	options.defaultGroup = this->options.defaultGroup;
+	options.loggingAgentPassword = loggingAgentPassword;
+	if (!this->defaultUser.empty()) {
+		options.defaultUser = defaultUser;
+	}
+	if (!this->defaultGroup.empty()) {
+		options.defaultGroup = defaultGroup;
+	}
 
 	fillPoolOption(req, options.appGroupName, "!~PASSENGER_APP_GROUP_NAME");
 	fillPoolOption(req, options.appType, "!~PASSENGER_APP_TYPE");
