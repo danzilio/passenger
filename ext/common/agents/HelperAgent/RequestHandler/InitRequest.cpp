@@ -64,6 +64,21 @@ initializePoolOptions(Client *client, Request *req) {
 	}
 }
 
+void
+fillPoolOptionsFromAgentsOptions(Options &options) {
+	options.ruby = defaultRuby;
+	options.logLevel = getLogLevel();
+	options.loggingAgentAddress = loggingAgentAddress;
+	options.loggingAgentUsername = P_STATIC_STRING("logging");
+	options.loggingAgentPassword = loggingAgentPassword;
+	if (!this->defaultUser.empty()) {
+		options.defaultUser = defaultUser;
+	}
+	if (!this->defaultGroup.empty()) {
+		options.defaultGroup = defaultGroup;
+	}
+}
+
 static void
 fillPoolOption(Request *req, StaticString &field, const HashedStaticString &name) {
 	const LString *value = req->secureHeaders.lookup(name);
@@ -164,17 +179,7 @@ createNewPoolOptions(Client *client, Request *req) {
 		options.baseURI = StaticString(scriptName->start->data, scriptName->size);
 	}
 
-	options.ruby = defaultRuby;
-	options.logLevel = getLogLevel();
-	options.loggingAgentAddress = loggingAgentAddress;
-	options.loggingAgentUsername = P_STATIC_STRING("logging");
-	options.loggingAgentPassword = loggingAgentPassword;
-	if (!this->defaultUser.empty()) {
-		options.defaultUser = defaultUser;
-	}
-	if (!this->defaultGroup.empty()) {
-		options.defaultGroup = defaultGroup;
-	}
+	fillPoolOptionsFromAgentsOptions(options);
 
 	fillPoolOption(req, options.appGroupName, "!~PASSENGER_APP_GROUP_NAME");
 	fillPoolOption(req, options.appType, "!~PASSENGER_APP_TYPE");

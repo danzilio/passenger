@@ -200,22 +200,10 @@ public:
 
 		if (!agentsOptions->getBool("multi_app")) {
 			boost::shared_ptr<Options> options = make_shared<Options>();
-
-			options->ruby = defaultRuby;
-			options->logLevel = getLogLevel();
-			options->loggingAgentAddress = loggingAgentAddress;
-			options->loggingAgentUsername = P_STATIC_STRING("logging");
-			options->loggingAgentPassword = loggingAgentPassword;
-			if (!this->defaultUser.empty()) {
-				options->defaultUser = defaultUser;
-			}
-			if (!this->defaultGroup.empty()) {
-				options->defaultGroup = defaultGroup;
-			}
+			fillPoolOptionsFromAgentsOptions(*options);
 			options->appRoot = agentsOptions->get("app_root");
 			options->appType = agentsOptions->get("app_type");
 			options->startupFile = agentsOptions->get("startup_file");
-
 			options->persist(*options);
 			options->clearPerRequestFields();
 			options->detachFromUnionStationTransaction();
