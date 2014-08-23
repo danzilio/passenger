@@ -954,6 +954,7 @@ usage() {
 	printf("                            Default: %d\n", DEFAULT_MAX_POOL_SIZE);
 	printf("\n");
 	printf("Other options (optional):\n");
+	printf("      --log-level LEVEL     Logging level. Default: %d\n", DEFAULT_LOG_LEVEL);
 	printf("  -h, --help                Show this help\n");
 }
 
@@ -994,6 +995,9 @@ parseOptions(int argc, const char *argv[], VariantMap &options) {
 		} else if (isFlag(argv[i], '\0', "--multi-app")) {
 			options.setBool("multi_app", true);
 			i++;
+		} else if (isValueFlag(argc, i, argv[i], '\0', "--log-level")) {
+			options.setInt("log_level", atoi(argv[i + 1]));
+			i += 2;
 		} else if (isFlag(argv[i], 'h', "--help")) {
 			usage();
 			exit(0);

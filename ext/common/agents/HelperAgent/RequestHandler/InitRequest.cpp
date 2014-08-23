@@ -18,9 +18,9 @@ onRequestBegin(Client *client, Request *req) {
 	}
 	setStickySessionId(client, req);
 
-	//checkoutSession(client, req);
+	checkoutSession(client, req);
 
-	writeResponse(client,
+	/* writeResponse(client,
 		"HTTP/1.1 200 OK\r\n"
 		"Content-Length: 3\r\n"
 		"Content-Type: text/plain\r\n"
@@ -28,7 +28,7 @@ onRequestBegin(Client *client, Request *req) {
 		"\r\n"
 		"ok\n"
 	);
-	endRequest(&client, &req);
+	endRequest(&client, &req); */
 }
 
 private:
