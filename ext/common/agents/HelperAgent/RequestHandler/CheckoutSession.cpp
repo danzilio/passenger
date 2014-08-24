@@ -7,6 +7,7 @@ checkoutSession(Client *client, Request *req) {
 
 	SKC_TRACE(client, 2, "Checking out session: appRoot=" << options.appRoot);
 	req->state = Request::CHECKING_OUT_SESSION;
+	req->requestBodyChannel.stop();
 	req->beginScopeLog(&req->scopeLogs.getFromPool, "get from pool");
 
 	callback.func = sessionCheckedOut;
@@ -24,7 +25,7 @@ sessionCheckedOut(const SessionPtr &session, const ExceptionPtr &e,
 {
 	Request *req = static_cast<Request *>(userData);
 	Client *client = static_cast<Client *>(req->client);
-	RequestHandler *self = static_cast<RequestHandler *>(client->getServer());
+	RequestHandler *self = static_cast<RequestHandler *>(getServerFromClient(client));
 
 	if (self->getContext()->libev->onEventLoopThread()) {
 		self->sessionCheckedOutFromEventLoopThread(client, req, session, e);
@@ -54,14 +55,13 @@ sessionCheckedOutFromEventLoopThread(Client *client, Request *req,
 		req->session = session;
 		initiateSession(client, req);
 	} else {
-		client->endScopeLog(&client->scopeLogs.getFromPool, false);
+		req->endScopeLog(&req->scopeLogs.getFromPool, false);
 		reportSessionCheckoutError(client, req, e);
 	}
 }
 
 void
-initiateSession(Client *client, Request *req, const SessionPtr &session) {
-
+initiateSession(Client *client, Request *req) {
 	writeResponse(client,
 		"HTTP/1.1 200 OK\r\n"
 		"Content-Length: 3\r\n"
@@ -86,11 +86,11 @@ reportSessionCheckoutError(Client *client, Request *req, const ExceptionPtr &e) 
 	{
 		boost::shared_ptr<SpawnException> e2 = dynamic_pointer_cast<SpawnException>(e);
 		if (e2 != NULL) {
-			writeSpawnExceptionErrorResponse(client, e2);
+			writeSpawnExceptionErrorResponse(client, req, e2);
 			return;
 		}
 	}
-	writeOtherExceptionErrorResponse(client, e);
+	writeOtherExceptionErrorResponse(client, req, e);
 }
 
 void
@@ -102,21 +102,21 @@ writeRequestQueueFullExceptionErrorResponse(Client *client, Request *req) {
 		requestQueueOverflowStatusCode = stringToInt(
 			StaticString(value->start->data, value->size));
 	}
-	writeResponse(client, req, requestQueueOverflowStatusCode,
+	endRequestWithSimpleResponse(&client, &req,
 		"<h1>This website is under heavy load</h1>"
 		"<p>We're sorry, too many people are accessing this website at the same "
-		"time. We're working on this problem. Please try again later.</p>");
-	endRequest(&client, &req);
+		"time. We're working on this problem. Please try again later.</p>",
+		requestQueueOverflowStatusCode);
 }
 
 void
 writeSpawnExceptionErrorResponse(Client *client, Request *req,
 	const boost::shared_ptr<SpawnException> &e)
 {
-	RH_ERROR(client, "Cannot checkout session because a spawning error occurred. " <<
+	SKC_ERROR(client, "Cannot checkout session because a spawning error occurred. " <<
 		"The identifier of the error is " << e->get("error_id") << ". Please see earlier logs for " <<
 		"details about the error.");
-	writeErrorResponse(client, e->getErrorPage(), e.get());
+	endRequestWithErrorResponse(&client, &req, e->getErrorPage(), e.get());
 }
 
 void
@@ -135,19 +135,71 @@ writeOtherExceptionErrorResponse(Client *client, Request *req, const ExceptionPt
 		typeName = typeid(*e).name();
 	#endif
 
-	RH_WARN(client, "Cannot checkout session (exception type " <<
+	SKC_WARN(client, "Cannot checkout session (exception type " <<
 		typeName << "): " << e->what());
 
-	string response = "An internal error occurred while trying to spawn the application.\n";
-	response.append("Exception type: ");
-	response.append(typeName);
-	response.append("\nError message: ");
-	response.append(e->what());
+	const unsigned int exceptionMessageLen = strlen(e->what());
+	string backtrace;
 	boost::shared_ptr<tracable_exception> e3 = dynamic_pointer_cast<tracable_exception>(e);
 	if (e3 != NULL) {
-		response.append("\nBacktrace:\n");
-		response.append(e3->backtrace());
+		backtrace = e3->backtrace();
 	}
 
-	writeErrorResponse(client, response);
+	const unsigned int BUFFER_SIZE = 512 + typeName.size() +
+		exceptionMessageLen + backtrace.size();
+	char *buf = (char *) psg_pnalloc(req->pool, BUFFER_SIZE);
+	char *pos = buf;
+	const char *end = buf + BUFFER_SIZE;
+
+	pos = appendData(pos, end, "An internal error occurred while trying to spawn the application.\n");
+	pos = appendData(pos, end, "Exception type: ");
+	pos = appendData(pos, end, typeName);
+	pos = appendData(pos, end, "\nError message: ");
+	pos = appendData(pos, end, e->what(), exceptionMessageLen);
+	if (!backtrace.empty()) {
+		pos = appendData(pos, end, "\nBacktrace:\n");
+		pos = appendData(pos, end, backtrace);
+	}
+
+	endRequestWithSimpleResponse(&client, &req, StaticString(buf, pos - buf), 500);
+}
+
+/**
+ * `message` will be copied and doesn't need to outlive the request.
+ */
+void
+endRequestWithErrorResponse(Client **c, Request **r, const StaticString &message,
+	const SpawnException *e = NULL)
+{
+	Client *client = *c;
+	Request *req = *r;
+	ErrorRenderer renderer(*resourceLocator);
+	string data;
+
+	if (friendlyErrorPagesEnabled(req)) {
+		try {
+			data = renderer.renderWithDetails(message, req->options, e);
+		} catch (const SystemException &e2) {
+			SKC_ERROR(client, "Cannot render an error page: " << e2.what() <<
+				"\n" << e2.backtrace());
+			data = message;
+		}
+	} else {
+		try {
+			data = renderer.renderWithoutDetails();
+		} catch (const SystemException &e2) {
+			SKC_ERROR(client, "Cannot render an error page: " << e2.what() <<
+				"\n" << e2.backtrace());
+			data = "Internal Server Error";
+		}
+	}
+
+	endRequestWithSimpleResponse(c, r, psg_pstrdup(req->pool, data), 500);
+}
+
+bool
+friendlyErrorPagesEnabled(Request *req) {
+	bool defaultValue = req->options.environment != "staging"
+		&& req->options.environment != "production";
+	return getBoolOption(req, "!~PASSENGER_FRIENDLY_ERROR_PAGES", defaultValue);
 }
