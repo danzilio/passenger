@@ -120,6 +120,7 @@
 #endif
 
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <utility>
 #include <typeinfo>
 #include <cassert>
@@ -176,6 +177,7 @@ private:
 	#include <agents/HelperAgent/RequestHandler/Hooks.cpp>
 	#include <agents/HelperAgent/RequestHandler/InitRequest.cpp>
 	#include <agents/HelperAgent/RequestHandler/CheckoutSession.cpp>
+	#include <agents/HelperAgent/RequestHandler/SendRequest.cpp>
 
 public:
 	ResourceLocator *resourceLocator;

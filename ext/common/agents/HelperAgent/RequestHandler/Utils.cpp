@@ -14,21 +14,21 @@ getLoop() {
 }
 
 void
-disconnectWithClientSocketWriteError(Client *client, int e) {
+disconnectWithClientSocketWriteError(Client **client, int e) {
 	stringstream message;
 	message << "client socket write error: ";
 	message << strerror(e);
 	message << " (errno=" << e << ")";
-	disconnectWithError(&client, message.str());
+	disconnectWithError(client, message.str());
 }
 
 void
-disconnectWithAppSocketWriteError(Client *client, int e) {
+disconnectWithAppSocketWriteError(Client **client, int e) {
 	stringstream message;
 	message << "app socket write error: ";
 	message << strerror(e);
 	message << " (errno=" << e << ")";
-	disconnectWithError(&client, message.str());
+	disconnectWithError(client, message.str());
 }
 
 void
