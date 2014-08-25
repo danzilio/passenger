@@ -128,8 +128,9 @@ public:
 		endScopeLog(&scopeLogs.bufferingRequestBody, false);
 		endScopeLog(&scopeLogs.requestProcessing, false);
 
-		appOutput.deinitialize();
 		appInput.deinitialize();
+		appInput.setDataFlushedCallback(NULL);
+		appOutput.deinitialize();
 	}
 
 	void deinitialize() {

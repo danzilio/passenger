@@ -96,22 +96,9 @@ initiateSession(Client *client, Request *req) {
 
 	SKC_DEBUG(client, "Session initiated: fd=" << req->session->fd());
 	setNonBlocking(req->session->fd());
-	req->requestBodyChannel.start();
 	req->appInput.reinitialize(req->session->fd());
 	req->appOutput.reinitialize(req->session->fd());
 	sendHeaderToApp(client, req);
-
-	/*
-	writeResponse(client,
-		"HTTP/1.1 200 OK\r\n"
-		"Content-Length: 3\r\n"
-		"Content-Type: text/plain\r\n"
-		"Connection: keep-alive\r\n"
-		"\r\n"
-		"ok\n"
-	);
-	endRequest(&client, &req);
-	*/
 }
 
 static void

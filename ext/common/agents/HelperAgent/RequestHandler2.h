@@ -164,11 +164,15 @@ private:
 	typedef ServerKit::HttpServer<RequestHandler, Client> ParentClass;
 
 	const VariantMap *agentsOptions;
-	string defaultRuby;
-	string loggingAgentAddress;
-	string loggingAgentPassword;
-	string defaultUser;
-	string defaultGroup;
+	psg_pool_t *stringPool;
+	StaticString defaultRuby;
+	StaticString loggingAgentAddress;
+	StaticString loggingAgentPassword;
+	StaticString defaultUser;
+	StaticString defaultGroup;
+	StaticString serverName;
+	boost::uint32_t HTTP_CONTENT_TYPE_HASH;
+	boost::uint32_t HTTP_CONTENT_LENGTH_HASH;
 
 	StringKeyTable< boost::shared_ptr<Options> > poolOptionsCache;
 	bool singleAppMode;
@@ -187,32 +191,50 @@ public:
 	RequestHandler(ServerKit::Context *context, const VariantMap *_agentsOptions)
 		: ParentClass(context),
 		  agentsOptions(_agentsOptions),
+		  stringPool(psg_create_pool(1024 * 4)),
 		  poolOptionsCache(4),
 		  singleAppMode(false),
 		  PASSENGER_APP_GROUP_NAME("!~PASSENGER_APP_GROUP_NAME"),
 		  PASSENGER_MAX_REQUESTS("!~PASSENGER_MAX_REQUESTS"),
 		  PASSENGER_STICKY_SESSIONS("!~PASSENGER_STICKY_SESSIONS"),
 		  PASSENGER_STICKY_SESSIONS_COOKIE_NAME("!~PASSENGER_STICKY_SESSIONS_COOKIE_NAME"),
-		  HTTP_COOKIE("cookie")
+		  HTTP_COOKIE("cookie"),
+		  HTTP_CONTENT_TYPE_HASH(HashedStaticString("content-type").hash()),
+		  HTTP_CONTENT_LENGTH_HASH(HashedStaticString("content-length").hash())
 	{
-		defaultRuby = agentsOptions->get("default_ruby");
-		loggingAgentAddress = agentsOptions->get("logging_agent_address", false);
-		loggingAgentPassword = agentsOptions->get("logging_agent_password", false);
-		defaultUser = agentsOptions->get("default_user", false);
-		defaultGroup = agentsOptions->get("default_group", false);
+		defaultRuby = psg_pstrdup(stringPool,
+			agentsOptions->get("default_ruby"));
+		loggingAgentAddress = psg_pstrdup(stringPool,
+			agentsOptions->get("logging_agent_address", false));
+		loggingAgentPassword = psg_pstrdup(stringPool,
+			agentsOptions->get("logging_agent_password", false));
+		defaultUser = psg_pstrdup(stringPool,
+			agentsOptions->get("default_user", false));
+		defaultGroup = psg_pstrdup(stringPool,
+			agentsOptions->get("default_group", false));
+		if (agentsOptions->has("server_name")) {
+			serverName = psg_pstrdup(stringPool,
+				agentsOptions->get("server_name");
+		} else {
+			serverName = PROGRAM_NAME "/" PASSENGER_VERSION;
+		}
 
 		if (!agentsOptions->getBool("multi_app")) {
 			boost::shared_ptr<Options> options = make_shared<Options>();
 			fillPoolOptionsFromAgentsOptions(*options);
-			options->appRoot = agentsOptions->get("app_root");
-			options->appType = agentsOptions->get("app_type");
-			options->startupFile = agentsOptions->get("startup_file");
-			options->persist(*options);
-			options->clearPerRequestFields();
-			options->detachFromUnionStationTransaction();
+			options->appRoot = psg_pstrdup(stringPool,
+				agentsOptions->get("app_root"));
+			options->appType = psg_pstrdup(stringPool,
+				agentsOptions->get("app_type"));
+			options->startupFile = psg_pstrdup(stringPool,
+				agentsOptions->get("startup_file"));
 			poolOptionsCache.insert(options->getAppGroupName(), options);
 			singleAppMode = true;
 		}
+	}
+
+	~RequestHandler() {
+		psg_destroy_pool(stringPool);
 	}
 
 	void initialize() {

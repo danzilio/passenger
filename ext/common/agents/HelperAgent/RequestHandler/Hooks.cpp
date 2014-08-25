@@ -12,12 +12,13 @@ onClientAccepted(Client *client) {
 virtual void
 onRequestObjectCreated(Client *client, Request *req) {
 	ParentClass::onRequestObjectCreated(client, req);
+
 	req->appInput.setContext(getContext());
 	req->appInput.setHooks(&req->hooks);
+
 	req->appOutput.setContext(getContext());
 	req->appOutput.setHooks(&req->hooks);
-	//req.appOutput.errorCallback = ...;
-	//req.appOutput.setFlushedCallback();
+	req->appOutput.setDataCallback(onAppOutputData);
 
 	//req.responseDechunker.onData   = onAppInputChunk;
 	//req.responseDechunker.onEnd    = onAppInputChunkEnd;
