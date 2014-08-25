@@ -4,7 +4,8 @@ private:
 
 void
 sendHeaderToApp(Client *client, Request *req) {
-	SKC_TRACE(client, 2, "Sending headers to application");
+	SKC_TRACE(client, 2, "Sending headers to application with " <<
+		req->session->getProtocol() << " protocol");
 	req->state = Request::SENDING_HEADER_TO_APP;
 	if (req->session->getProtocol() == "session") {
 		req->halfCloseAppConnection = true;
@@ -15,9 +16,16 @@ sendHeaderToApp(Client *client, Request *req) {
 	}
 }
 
+struct SessionProtocolWorkingState {
+	const char *methodStr;
+	size_t methodStrLen;
+};
+
 void
 sendHeaderToAppWithSessionProtocol(Client *client, Request *req) {
-	unsigned int bufferSize = determineHeaderSizeForSessionProtocol(req);
+	SessionProtocolWorkingState state;
+	unsigned int bufferSize = determineHeaderSizeForSessionProtocol(req,
+		state);
 	MemoryKit::mbuf_pool &mbuf_pool = getContext()->mbuf_pool;
 	bool ok;
 
@@ -26,16 +34,20 @@ sendHeaderToAppWithSessionProtocol(Client *client, Request *req) {
 		bufferSize = mbuf_pool.mbuf_block_chunk_size;
 
 		ok = constructHeaderForSessionProtocol(req, buffer.start,
-			bufferSize);
+			bufferSize, state);
 		assert(ok);
 		buffer = MemoryKit::mbuf(buffer, 0, bufferSize);
+		SKC_TRACE(client, 3, "Header data: " << cEscapeString(
+			StaticString(buffer.start, bufferSize)));
 		req->appInput.feed(boost::move(buffer));
 	} else {
 		char *buffer = (char *) psg_pnalloc(req->pool, bufferSize);
 
 		ok = constructHeaderForSessionProtocol(req, buffer,
-			bufferSize);
+			bufferSize, state);
 		assert(ok);
+		SKC_TRACE(client, 3, "Header data: " << cEscapeString(
+			StaticString(buffer, bufferSize)));
 		req->appInput.feed(buffer, bufferSize);
 	}
 
@@ -43,13 +55,18 @@ sendHeaderToAppWithSessionProtocol(Client *client, Request *req) {
 
 	if (!req->ended()) {
 		if (!req->appInput.ended()) {
+			req->appOutput.startReadingInNextTick();
 			if (!req->appInput.passedThreshold()) {
 				sendBodyToApp(client, req);
 			} else {
+				SKC_TRACE(client, 3, "Waiting for appInput buffers to be "
+					"flushed before sending body to application");
 				req->appInput.setBuffersFlushedCallback(sendBodyToAppWhenBuffersFlushed);
 			}
 		} else {
+			SKC_TRACE(client, 3, "App input ended");
 			req->state = Request::WAITING_FOR_APP_OUTPUT;
+			req->appOutput.startReading();
 		}
 	}
 }
@@ -69,7 +86,9 @@ sendBodyToAppWhenBuffersFlushed(FileBufferedChannel *_channel) {
 }
 
 unsigned int
-determineHeaderSizeForSessionProtocol(Request *req) {
+determineHeaderSizeForSessionProtocol(Request *req,
+	SessionProtocolWorkingState &state)
+{
 	unsigned int dataSize = sizeof(boost::uint32_t);
 
 	dataSize += sizeof("REQUEST_URI");
@@ -81,8 +100,13 @@ determineHeaderSizeForSessionProtocol(Request *req) {
 	dataSize += sizeof("SCRIPT_NAME");
 	dataSize += sizeof("");
 
+	state.methodStr = http_method_str(req->method);
+	state.methodStrLen = strlen(state.methodStr);
+	dataSize += sizeof("REQUEST_METHOD");
+	dataSize += state.methodStrLen + 1;
+
 	dataSize += sizeof("SERVER_NAME");
-	dataSize += serverName.size();
+	dataSize += serverName.size() + 1;
 
 	dataSize += sizeof("PASSENGER_CONNECT_PASSWORD");
 	dataSize += req->session->getGroupSecret().size() + 1;
@@ -96,16 +120,21 @@ determineHeaderSizeForSessionProtocol(Request *req) {
 	while (*it != NULL) {
 		dataSize += sizeof("HTTP_") - 1 + it->header->key.size + 1;
 		dataSize += it->header->val.size + 1;
+		it.next();
 	}
 
 	return dataSize + 1;
 }
 
 bool
-constructHeaderForSessionProtocol(Request *req, char *buffer, unsigned int &size) {
+constructHeaderForSessionProtocol(Request *req, char *buffer, unsigned int &size,
+	const SessionProtocolWorkingState &state)
+{
 	char *pos = buffer;
 	const char *end = buffer + size;
 	const LString::Part *part;
+
+	pos += sizeof(boost::uint32_t);
 
 	pos = appendData(pos, end, P_STATIC_STRING_WITH_NULL("REQUEST_URI"));
 	part = req->path.start;
@@ -113,6 +142,7 @@ constructHeaderForSessionProtocol(Request *req, char *buffer, unsigned int &size
 		pos = appendData(pos, end, part->data, part->size);
 		part = part->next;
 	}
+	pos = appendData(pos, end, "", 1);
 
 	pos = appendData(pos, end, P_STATIC_STRING_WITH_NULL("PATH_INFO"));
 	part = req->path.start;
@@ -120,12 +150,18 @@ constructHeaderForSessionProtocol(Request *req, char *buffer, unsigned int &size
 		pos = appendData(pos, end, part->data, part->size);
 		part = part->next;
 	}
+	pos = appendData(pos, end, "", 1);
 
 	pos = appendData(pos, end, P_STATIC_STRING_WITH_NULL("SCRIPT_NAME"));
 	pos = appendData(pos, end, P_STATIC_STRING_WITH_NULL(""));
 
+	pos = appendData(pos, end, P_STATIC_STRING_WITH_NULL("REQUEST_METHOD"));
+	pos = appendData(pos, end, StaticString(state.methodStr, state.methodStrLen));
+	pos = appendData(pos, end, "", 1);
+
 	pos = appendData(pos, end, P_STATIC_STRING_WITH_NULL("SERVER_NAME"));
 	pos = appendData(pos, end, serverName);
+	pos = appendData(pos, end, "", 1);
 
 	pos = appendData(pos, end, P_STATIC_STRING_WITH_NULL("PASSENGER_CONNECT_PASSWORD"));
 	pos = appendData(pos, end, req->session->getGroupSecret());
@@ -167,6 +203,8 @@ constructHeaderForSessionProtocol(Request *req, char *buffer, unsigned int &size
 		it.next();
 	}
 
+	Uint32Message::generate(buffer, pos - buffer - sizeof(boost::uint32_t));
+
 	size = pos - buffer;
 	return pos < end;
 }
@@ -178,7 +216,7 @@ httpHeaderToScgiUpperCase(unsigned char *data, unsigned int size) {
 	while (data < end) {
 		unsigned char ch = *data;
 		if (ch >= 'a' && ch <= 'z') {
-			*data = ch & 0x95;
+			*data = ch & 0x5f;
 		} else if (ch == '-') {
 			*data = '_';
 		}
@@ -393,12 +431,14 @@ sendBodyToApp(Client *client, Request *req) {
 	if (req->hasRequestBody()) {
 		// onRequestBody() will take care of forwarding
 		// the request body to the app.
+		SKC_TRACE(client, 2, "Sending body to application");
 		req->state = Request::FORWARDING_BODY_TO_APP;
 		req->requestBodyChannel.start();
 	} else {
 		// Our task is done. ForwardResponse.cpp will take
 		// care of ending the request, once all response
 		// data is forwarded.
+		SKC_TRACE(client, 2, "No body to send to application");
 		req->state = Request::WAITING_FOR_APP_OUTPUT;
 	}
 }
@@ -424,8 +464,9 @@ onRequestBody(Client *client, Request *req, const MemoryKit::mbuf &buffer,
 		} else {
 			return Channel::Result(buffer.size(), true);
 		}
-	} else if (errcode == 0) {
+	} else if (errcode == 0 || errcode == ECONNRESET) {
 		// EOF
+		SKC_TRACE(client, 2, "Client sent EOF");
 		if (req->halfCloseAppConnection) {
 			// TODO...
 			::shutdown(req->session->fd(), SHUT_WR);

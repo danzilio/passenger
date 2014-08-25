@@ -4,6 +4,7 @@ protected:
 
 virtual void
 onRequestBegin(Client *client, Request *req) {
+	SKC_TRACE(client, 2, "Initiating request");
 	req->startedAt = ev_now(getLoop());
 	req->requestBodyChannel.stop();
 

@@ -12,10 +12,14 @@ onAppOutputData(Channel *_channel, const MemoryKit::mbuf &buffer, int errcode) {
 
 	if (buffer.size() > 0) {
 		// Data
+		SKC_TRACE_FROM_STATIC(self, client, 3, "Application sent " <<
+			buffer.size() << " bytes of data: " << cEscapeString(StaticString(
+				buffer.start, buffer.size())));
 		self->writeResponse(client, buffer);
 		return Channel::Result(buffer.size(), false);
-	} else if (errcode != 0 || errcode == ECONNRESET) {
+	} else if (errcode == 0 || errcode == ECONNRESET) {
 		// EOF
+		SKC_TRACE_FROM_STATIC(self, client, 2, "Application sent EOF");
 		self->endRequest(&client, &req);
 		return Channel::Result(0, true);
 	} else {
