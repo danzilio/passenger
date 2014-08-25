@@ -54,6 +54,7 @@ sendHeaderToAppWithSessionProtocol(Client *client, Request *req) {
 	(void) ok; // Shut up compiler warning
 
 	if (!req->ended()) {
+		writeResponse(client, "HTTP/1.1 200 OK\r\n");
 		if (!req->appInput.ended()) {
 			req->appOutput.startReadingInNextTick();
 			if (!req->appInput.passedThreshold()) {
@@ -64,7 +65,10 @@ sendHeaderToAppWithSessionProtocol(Client *client, Request *req) {
 				req->appInput.setBuffersFlushedCallback(sendBodyToAppWhenBuffersFlushed);
 			}
 		} else {
-			SKC_TRACE(client, 3, "App input ended");
+			// req->appInput.feed() encountered an error while writing to the
+			// application socket. But we don't care about that; we just care that
+			// ForwardResponse.cpp will now forward the response data and end the
+			// request.
 			req->state = Request::WAITING_FOR_APP_OUTPUT;
 			req->appOutput.startReading();
 		}
