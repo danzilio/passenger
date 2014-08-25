@@ -148,7 +148,7 @@ constructHeaderForSessionProtocol(Request *req, char *buffer, unsigned int &size
 		while (part != NULL) {
 			char *start = pos;
 			pos = appendData(pos, end, part->data, part->size);
-			httpHeaderToScgiUpperCase(start, pos - start);
+			httpHeaderToScgiUpperCase((unsigned char *) start, pos - start);
 			part = part->next;
 		}
 		pos = appendData(pos, end, "", 1);
@@ -165,6 +165,21 @@ constructHeaderForSessionProtocol(Request *req, char *buffer, unsigned int &size
 
 	size = pos - buffer;
 	return pos < end;
+}
+
+void
+httpHeaderToScgiUpperCase(unsigned char *data, unsigned int size) {
+	const unsigned char *end = data + size;
+
+	while (data < end) {
+		unsigned char ch = *data;
+		if (ch >= 'a' && ch <= 'z') {
+			*data = ch & 0x95;
+		} else if (ch == '-') {
+			*data = '_';
+		}
+		data++;
+	}
 }
 
 /**
