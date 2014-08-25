@@ -1,15 +1,16 @@
+// This file is included inside the RequestHandler class.
+
 private:
 
 void
 sendHeaderToApp(Client *client, Request *req) {
 	SKC_TRACE(client, 2, "Sending headers to application");
-
 	req->state = Request::SENDING_HEADER_TO_APP;
-	req->requestBodyChannel.start();
-
 	if (req->session->getProtocol() == "session") {
-		sendHeaderToAppWithSessionProtocol(client, req, size);
+		req->halfCloseAppConnection = true;
+		sendHeaderToAppWithSessionProtocol(client, req);
 	} else {
+		req->halfCloseAppConnection = false;
 		sendHeaderToAppWithHttpProtocol(client, req);
 	}
 }
@@ -27,7 +28,7 @@ sendHeaderToAppWithSessionProtocol(Client *client, Request *req) {
 		ok = constructHeaderForSessionProtocol(req, buffer.start,
 			bufferSize);
 		assert(ok);
-		buffer = Memory::mbuf(buffer, 0, bufferSize);
+		buffer = MemoryKit::mbuf(buffer, 0, bufferSize);
 		req->appInput.feed(boost::move(buffer));
 	} else {
 		char *buffer = (char *) psg_pnalloc(req->pool, bufferSize);
@@ -40,28 +41,30 @@ sendHeaderToAppWithSessionProtocol(Client *client, Request *req) {
 
 	(void) ok; // Shut up compiler warning
 
-	if (!req->appInput.ended()) {
-		if (!req->appInput.passedThreshold()) {
-			sendBodyToApp(client, req);
+	if (!req->ended()) {
+		if (!req->appInput.ended()) {
+			if (!req->appInput.passedThreshold()) {
+				sendBodyToApp(client, req);
+			} else {
+				req->appInput.setBuffersFlushedCallback(sendBodyToAppWhenBuffersFlushed);
+			}
 		} else {
-			req->appInput.setDataFlushedCallback(sendBodyToAppWhenDataFlushed);
+			req->state = Request::WAITING_FOR_APP_OUTPUT;
 		}
-	} else {
-		// TODO
 	}
 }
 
 static void
-sendBodyToAppWhenDataFlushed(FileBufferedChannel *_channel) {
+sendBodyToAppWhenBuffersFlushed(FileBufferedChannel *_channel) {
 	FileBufferedFdOutputChannel *channel =
 		reinterpret_cast<FileBufferedFdOutputChannel *>(_channel);
-	Request *req = static_cast<Request *>(static_cast<BaseHttpRequest *>(
-		channel->getHooks()->userData));
+	Request *req = static_cast<Request *>(static_cast<
+		ServerKit::BaseHttpRequest *>(channel->getHooks()->userData));
 	Client *client = static_cast<Client *>(req->client);
 	RequestHandler *self = static_cast<RequestHandler *>(
 		getServerFromClient(client));
 
-	req->appInput.setDataFlushedCallback(NULL);
+	req->appInput.setBuffersFlushedCallback(NULL);
 	self->sendBodyToApp(client, req);
 }
 
@@ -134,6 +137,7 @@ constructHeaderForSessionProtocol(Request *req, char *buffer, unsigned int &size
 		pos = appendData(pos, end, "", 1);
 	}
 
+	ServerKit::HeaderTable::Iterator it(req->headers);
 	while (*it != NULL) {
 		if ((it->header->hash == HTTP_CONTENT_TYPE_HASH
 			|| it->header->hash == HTTP_CONTENT_LENGTH_HASH)
@@ -386,63 +390,102 @@ sendHeaderToAppWithHttpProtocol(Client *client, Request *req) {
 
 void
 sendBodyToApp(Client *client, Request *req) {
-	req->appInput.errorCallback = onAppInputError;
 	if (req->hasRequestBody()) {
+		// onRequestBody() will take care of forwarding
+		// the request body to the app.
+		req->state = Request::FORWARDING_BODY_TO_APP;
 		req->requestBodyChannel.start();
 	} else {
-		req->appInput.setDataFlushedCallback(onAppInputDataFlushed);
-		req->appInput.feed(MemoryKit::mbuf());
+		// Our task is done. ForwardResponse.cpp will take
+		// care of ending the request, once all response
+		// data is forwarded.
+		req->state = Request::WAITING_FOR_APP_OUTPUT;
 	}
-	endRequest(&client, &req);
+}
+
+
+protected:
+
+virtual Channel::Result
+onRequestBody(Client *client, Request *req, const MemoryKit::mbuf &buffer,
+	int errcode)
+{
+	assert(req->state == Request::FORWARDING_BODY_TO_APP);
+
+	if (buffer.size() > 0) {
+		// Data
+		req->appInput.feed(buffer);
+		if (!req->appInput.ended()) {
+			if (req->appInput.passedThreshold()) {
+				req->requestBodyChannel.stop();
+				req->appInput.setBuffersFlushedCallback(resumeRequestBodyChannelWhenBuffersFlushed);
+			}
+			return Channel::Result(buffer.size(), false);
+		} else {
+			return Channel::Result(buffer.size(), true);
+		}
+	} else if (errcode == 0) {
+		// EOF
+		if (req->halfCloseAppConnection) {
+			// TODO...
+			::shutdown(req->session->fd(), SHUT_WR);
+		}
+		// Our task is done. ForwardResponse.cpp will take
+		// care of ending the request, once all response
+		// data is forwarded.
+		req->state = Request::WAITING_FOR_APP_OUTPUT;
+		return Channel::Result(0, true);
+	} else {
+		const unsigned int BUFSIZE = 1024;
+		char *message = (char *) psg_pnalloc(req->pool, BUFSIZE);
+		int size = snprintf(message, BUFSIZE,
+			"error reading request body: %s (errno=%d)",
+			strerror(errcode), errcode);
+		disconnectWithError(&client, StaticString(message, size));
+		return Channel::Result(0, true);
+	}
 }
 
 static void
+resumeRequestBodyChannelWhenBuffersFlushed(FileBufferedChannel *_channel) {
+	FileBufferedFdOutputChannel *channel =
+		reinterpret_cast<FileBufferedFdOutputChannel *>(_channel);
+	Request *req = static_cast<Request *>(static_cast<
+		ServerKit::BaseHttpRequest *>(channel->getHooks()->userData));
+
+	assert(req->state == Request::FORWARDING_BODY_TO_APP);
+
+	req->appInput.setBuffersFlushedCallback(NULL);
+	req->requestBodyChannel.start();
+}
+
+
+private:
+
+static void
 onAppInputError(FileBufferedFdOutputChannel *channel, int errcode) {
-	Request *req = static_cast<Request *>(static_cast<BaseHttpRequest *>(
-		channel->getHooks()->userData)));
+	Request *req = static_cast<Request *>(static_cast<
+		ServerKit::BaseHttpRequest *>(channel->getHooks()->userData));
 	Client *client = static_cast<Client *>(req->client);
 	RequestHandler *self = static_cast<RequestHandler *>(getServerFromClient(client));
 
+	assert(req->state == Request::SENDING_HEADER_TO_APP
+		|| req->state == Request::FORWARDING_BODY_TO_APP
+		|| req->state == Request::WAITING_FOR_APP_OUTPUT);
+
 	if (errcode == EPIPE) {
+		// We consider an EPIPE non-fatal: we don't care whether the
+		// app stopped reading, we just care about its output.
 		SKC_DEBUG_FROM_STATIC(self, client, "cannot write to application socket: "
 			"the application closed the socket prematurely");
 	} else if (req->responded) {
 		const unsigned int BUFSIZE = 1024;
 		char *message = (char *) psg_pnalloc(req->pool, BUFSIZE);
-		int size = snprintf(message, BUFSIZE, "cannot write to application socket: ");
+		int size = snprintf(message, BUFSIZE,
+			"cannot write to application socket: %s (errno=%d)",
+			strerror(errcode), errcode);
 		self->disconnectWithError(&client, StaticString(message, size));
 	} else {
 		self->endRequest(&client, &req);
-	}
-}
-
-static void
-onAppInputDataFlushed(FileBufferedChannel *_channel, const MemoryKit::mbuf &buffer,
-	int errcode)
-{
-	FileBufferedFdOutputChannel *channel = reinterpret_cast<FileBufferedFdOutputChannel *>(
-		_channel);
-	Request *req = static_cast<Request *>(static_cast<BaseHttpRequest *>(
-		channel->getHooks()->userData)));
-	Client *client = static_cast<Client *>(req->client);
-	RequestHandler *self = static_cast<RequestHandler *>(getServerFromClient(client));
-
-	req->appInput.setDataFlushedCallback(NULL);
-}
-
-static void
-onAppOutputData(Channel *_channel, const MemoryKit::mbuf &buffer, int errcode) {
-	FdInputChannel *channel = reinterpret_cast<FdInputChannel *>(_channel);
-	Request *req = static_cast<Request *>(static_cast<BaseHttpRequest *>(
-		channel->getHooks()->userData)));
-	Client *client = static_cast<Client *>(req->client);
-	RequestHandler *self = static_cast<RequestHandler *>(getServerFromClient(client));
-
-	if (buffer.size() > 0) {
-		P_DEBUG("app output: (" << StaticString(buffer.start, buffer.size()) << ")");
-	} else if (errcode != 0) {
-		// EOF
-	} else {
-		// error
 	}
 }

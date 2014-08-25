@@ -42,6 +42,7 @@ AGENT_OBJECTS = {
 		'ext/common/agents/HelperAgent/RequestHandler/InitRequest.cpp',
 		'ext/common/agents/HelperAgent/RequestHandler/CheckoutSession.cpp',
 		'ext/common/agents/HelperAgent/RequestHandler/SendRequest.cpp',
+		'ext/common/agents/HelperAgent/RequestHandler/ForwardResponse.cpp',
 		'ext/common/agents/HelperAgent/ScgiRequestParser.h',
 		'ext/common/agents/HelperAgent/SystemMetricsTool.cpp',
 		'ext/common/Constants.h',

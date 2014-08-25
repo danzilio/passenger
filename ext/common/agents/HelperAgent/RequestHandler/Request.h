@@ -61,10 +61,11 @@ public:
 		CHECKING_OUT_SESSION,
 		SENDING_HEADER_TO_APP,
 		FORWARDING_BODY_TO_APP,
-		SENDING_SIMPLE_RESPONSE
+		WAITING_FOR_APP_OUTPUT
 	} state;
 
 	ev_tstamp startedAt;
+	bool halfCloseAppConnection;
 
 	Options options;
 	SessionPtr session;
@@ -110,6 +111,7 @@ public:
 		// RequestHandler::checkoutSession().
 
 		state = ANALYZING_REQUEST;
+		halfCloseAppConnection = false;
 		sessionCheckedOut = false;
 		sessionCheckoutTry = 0;
 		stickySession = false;
@@ -129,7 +131,7 @@ public:
 		endScopeLog(&scopeLogs.requestProcessing, false);
 
 		appInput.deinitialize();
-		appInput.setDataFlushedCallback(NULL);
+		appInput.setBuffersFlushedCallback(NULL);
 		appOutput.deinitialize();
 	}
 
@@ -146,8 +148,8 @@ public:
 			return "SENDING_HEADER_TO_APP";
 		case FORWARDING_BODY_TO_APP:
 			return "FORWARDING_BODY_TO_APP";
-		case SENDING_SIMPLE_RESPONSE:
-			return "SENDING_SIMPLE_RESPONSE";
+		case WAITING_FOR_APP_OUTPUT:
+			return "WAITING_FOR_APP_OUTPUT";
 		default:
 			return "UNKNOWN";
 		}

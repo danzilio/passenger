@@ -2,12 +2,6 @@
 
 private:
 
-HashedStaticString PASSENGER_APP_GROUP_NAME;
-HashedStaticString PASSENGER_MAX_REQUESTS;
-HashedStaticString PASSENGER_STICKY_SESSIONS;
-HashedStaticString PASSENGER_STICKY_SESSIONS_COOKIE_NAME;
-HashedStaticString HTTP_COOKIE;
-
 struct ev_loop *
 getLoop() {
 	return getContext()->libev->getLoop();

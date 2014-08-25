@@ -111,6 +111,7 @@
 
 #include <boost/shared_ptr.hpp>
 #include <boost/make_shared.hpp>
+#include <boost/cstdint.hpp>
 #include <ev++.h>
 #include <ostream>
 
@@ -131,6 +132,7 @@
 #include <Constants.h>
 #include <ServerKit/HttpServer.h>
 #include <MemoryKit/palloc.h>
+#include <DataStructures/LString.h>
 #include <DataStructures/StringKeyTable.h>
 #include <ApplicationPool2/ErrorRenderer.h>
 #include <StaticString.h>
@@ -150,8 +152,6 @@ using namespace oxt;
 using namespace ApplicationPool2;
 
 
-#define MAX_STATUS_HEADER_SIZE 64
-
 #define RH_LOG_EVENT(client, eventName) \
 	char _clientName[32]; \
 	getClientName(client, _clientName, sizeof(_clientName)); \
@@ -162,6 +162,10 @@ using namespace ApplicationPool2;
 class RequestHandler: public ServerKit::HttpServer<RequestHandler, Client> {
 private:
 	typedef ServerKit::HttpServer<RequestHandler, Client> ParentClass;
+	typedef ServerKit::Channel Channel;
+	typedef ServerKit::FdInputChannel FdInputChannel;
+	typedef ServerKit::FileBufferedChannel FileBufferedChannel;
+	typedef ServerKit::FileBufferedFdOutputChannel FileBufferedFdOutputChannel;
 
 	const VariantMap *agentsOptions;
 	psg_pool_t *stringPool;
@@ -171,36 +175,62 @@ private:
 	StaticString defaultUser;
 	StaticString defaultGroup;
 	StaticString serverName;
+	HashedStaticString PASSENGER_APP_GROUP_NAME;
+	HashedStaticString PASSENGER_MAX_REQUESTS;
+	HashedStaticString PASSENGER_STICKY_SESSIONS;
+	HashedStaticString PASSENGER_STICKY_SESSIONS_COOKIE_NAME;
+	HashedStaticString HTTP_COOKIE;
 	boost::uint32_t HTTP_CONTENT_TYPE_HASH;
 	boost::uint32_t HTTP_CONTENT_LENGTH_HASH;
 
 	StringKeyTable< boost::shared_ptr<Options> > poolOptionsCache;
 	bool singleAppMode;
 
-	#include <agents/HelperAgent/RequestHandler/Utils.cpp>
-	#include <agents/HelperAgent/RequestHandler/Hooks.cpp>
-	#include <agents/HelperAgent/RequestHandler/InitRequest.cpp>
-	#include <agents/HelperAgent/RequestHandler/CheckoutSession.cpp>
-	#include <agents/HelperAgent/RequestHandler/SendRequest.cpp>
-
 public:
 	ResourceLocator *resourceLocator;
 	PoolPtr appPool;
 	UnionStation::CorePtr unionStationCore;
 
+protected:
+	#include <agents/HelperAgent/RequestHandler/Utils.cpp>
+	#include <agents/HelperAgent/RequestHandler/InitRequest.cpp>
+	#include <agents/HelperAgent/RequestHandler/CheckoutSession.cpp>
+	#include <agents/HelperAgent/RequestHandler/SendRequest.cpp>
+	#include <agents/HelperAgent/RequestHandler/ForwardResponse.cpp>
+
+	virtual void
+	onClientAccepted(Client *client) {
+		ParentClass::onClientAccepted(client);
+		client->connectedAt = ev_now(getLoop());
+	}
+
+	virtual void
+	onRequestObjectCreated(Client *client, Request *req) {
+		ParentClass::onRequestObjectCreated(client, req);
+
+		req->appInput.setContext(getContext());
+		req->appInput.setHooks(&req->hooks);
+		req->appInput.errorCallback = onAppInputError;
+
+		req->appOutput.setContext(getContext());
+		req->appOutput.setHooks(&req->hooks);
+		req->appOutput.setDataCallback(onAppOutputData);
+	}
+
+public:
 	RequestHandler(ServerKit::Context *context, const VariantMap *_agentsOptions)
 		: ParentClass(context),
 		  agentsOptions(_agentsOptions),
 		  stringPool(psg_create_pool(1024 * 4)),
-		  poolOptionsCache(4),
-		  singleAppMode(false),
 		  PASSENGER_APP_GROUP_NAME("!~PASSENGER_APP_GROUP_NAME"),
 		  PASSENGER_MAX_REQUESTS("!~PASSENGER_MAX_REQUESTS"),
 		  PASSENGER_STICKY_SESSIONS("!~PASSENGER_STICKY_SESSIONS"),
 		  PASSENGER_STICKY_SESSIONS_COOKIE_NAME("!~PASSENGER_STICKY_SESSIONS_COOKIE_NAME"),
 		  HTTP_COOKIE("cookie"),
 		  HTTP_CONTENT_TYPE_HASH(HashedStaticString("content-type").hash()),
-		  HTTP_CONTENT_LENGTH_HASH(HashedStaticString("content-length").hash())
+		  HTTP_CONTENT_LENGTH_HASH(HashedStaticString("content-length").hash()),
+		  poolOptionsCache(4),
+		  singleAppMode(false)
 	{
 		defaultRuby = psg_pstrdup(stringPool,
 			agentsOptions->get("default_ruby"));
@@ -214,7 +244,7 @@ public:
 			agentsOptions->get("default_group", false));
 		if (agentsOptions->has("server_name")) {
 			serverName = psg_pstrdup(stringPool,
-				agentsOptions->get("server_name");
+				agentsOptions->get("server_name"));
 		} else {
 			serverName = PROGRAM_NAME "/" PASSENGER_VERSION;
 		}

@@ -1,12 +1,11 @@
 // This file is included inside the RequestHandler class.
-// It handles main events, and may forward events to
-// respective state-specific handlers.
 
 protected:
 
 virtual void
 onRequestBegin(Client *client, Request *req) {
 	req->startedAt = ev_now(getLoop());
+	req->requestBodyChannel.stop();
 
 	initializePoolOptions(client, req);
 	if (req->ended()) {

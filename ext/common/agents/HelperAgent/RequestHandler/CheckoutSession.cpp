@@ -1,3 +1,5 @@
+// This file is included inside the RequestHandler class.
+
 private:
 
 void
